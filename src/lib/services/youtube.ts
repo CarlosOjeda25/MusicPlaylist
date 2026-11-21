@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { decryptToken, encryptToken } from '../crypto';
 import { db } from '../db';
 import { UserTrack } from '../types';
@@ -6,7 +7,34 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
-export function getGoogleAuthUrl(): string {
+const OAUTH_STATE_SECRET = process.env.SESSION_SECRET || 'default_oauth_state_secret_32b_dev!';
+
+export function generateGoogleState(): string {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const timestamp = Date.now().toString();
+  const payload = `google:${nonce}:${timestamp}`;
+  const sig = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(payload).digest('hex');
+  return `${payload}:${sig}`;
+}
+
+export function verifyGoogleState(state: string | null): boolean {
+  if (!state) return false;
+  const parts = state.split(':');
+  if (parts.length !== 4) return false;
+  const [provider, nonce, timestampStr, sig] = parts;
+  if (provider !== 'google') return false;
+
+  const timestamp = parseInt(timestampStr, 10);
+  if (isNaN(timestamp)) return false;
+  if (Math.abs(Date.now() - timestamp) > 15 * 60 * 1000) return false;
+
+  const payload = `${provider}:${nonce}:${timestampStr}`;
+  const expectedSig = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(payload).digest('hex');
+  if (sig.length !== expectedSig.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig));
+}
+
+export function getGoogleAuthUrl(state?: string): string {
   const clientId = process.env.GOOGLE_CLIENT_ID || '';
   const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback';
   const scopes = [
@@ -16,6 +44,8 @@ export function getGoogleAuthUrl(): string {
     'email',
   ].join(' ');
 
+  const oauthState = state || generateGoogleState();
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -23,6 +53,7 @@ export function getGoogleAuthUrl(): string {
     scope: scopes,
     access_type: 'offline',
     prompt: 'consent',
+    state: oauthState,
   });
 
   return `${GOOGLE_AUTH_URL}?${params.toString()}`;
@@ -67,6 +98,7 @@ export async function exchangeGoogleCode(code: string): Promise<{
 export async function refreshGoogleToken(refreshTokenPlain: string): Promise<{
   accessToken: string;
   expiresIn: number;
+  refreshToken?: string;
 }> {
   const clientId = process.env.GOOGLE_CLIENT_ID || '';
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -93,6 +125,7 @@ export async function refreshGoogleToken(refreshTokenPlain: string): Promise<{
   return {
     accessToken: data.access_token,
     expiresIn: data.expires_in,
+    refreshToken: data.refresh_token,
   };
 }
 
@@ -120,7 +153,7 @@ export async function getValidGoogleAccessToken(userId: string): Promise<string>
     user_id: userId,
     provider: 'google',
     access_token_enc: encryptToken(refreshed.accessToken),
-    refresh_token_enc: account.refresh_token_enc,
+    refresh_token_enc: refreshed.refreshToken ? encryptToken(refreshed.refreshToken) : account.refresh_token_enc,
     expires_at: updatedExpiresAt,
     updated_at: new Date().toISOString(),
   });
@@ -136,6 +169,7 @@ export async function syncYouTubeTracks(userId: string): Promise<{
   const headers = { Authorization: `Bearer ${accessToken}` };
 
   const collectedTracks: Omit<UserTrack, 'id'>[] = [];
+  const MAX_PLAYLISTS = 20;
   let nextPageToken: string | undefined = undefined;
   let playlistsProcessed = 0;
 
@@ -143,20 +177,23 @@ export async function syncYouTubeTracks(userId: string): Promise<{
     const url = new URL(`${YOUTUBE_API_BASE}/playlists`);
     url.searchParams.set('part', 'snippet');
     url.searchParams.set('mine', 'true');
-    url.searchParams.set('maxResults', '50');
+    url.searchParams.set('maxResults', '20');
     if (nextPageToken) url.searchParams.set('pageToken', nextPageToken);
 
     const res: Response = await fetch(url.toString(), { headers });
     if (!res.ok) {
-      console.error(`[YouTube Sync] Error fetching playlists (${res.status})`);
-      break;
+      const errText = await res.text();
+      throw new Error(`YouTube API error (${res.status}): ${errText}`);
     }
 
     const data: { items?: Array<{ id: string; snippet?: { title: string } }>; nextPageToken?: string } = await res.json();
     const playlists = data.items || [];
-    playlistsProcessed += playlists.length;
+    if (playlists.length === 0) break;
 
     for (const pl of playlists) {
+      if (playlistsProcessed >= MAX_PLAYLISTS) break;
+      playlistsProcessed++;
+
       const plTitle = pl.snippet?.title || 'YouTube Playlist';
       let itemPageToken: string | undefined = undefined;
       let count = 0;
@@ -205,7 +242,7 @@ export async function syncYouTubeTracks(userId: string): Promise<{
     }
 
     nextPageToken = data.nextPageToken;
-  } while (nextPageToken && playlistsProcessed < 20);
+  } while (nextPageToken && playlistsProcessed < MAX_PLAYLISTS);
 
   return {
     playlistsCount: playlistsProcessed,

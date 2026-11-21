@@ -5,6 +5,13 @@ interface AISearchResult {
   reason: string;
 }
 
+const STOP_WORDS = new Set([
+  'para', 'por', 'con', 'sin', 'sobre', 'entre', 'hacia', 'hasta', 'desde',
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'del', 'al', 'que',
+  'de', 'en', 'y', 'o', 'pero', 'mas', 'como', 'the', 'and', 'or', 'for',
+  'with', 'without', 'from', 'to', 'in', 'on', 'at', 'by', 'an', 'a', 'music', 'musica'
+]);
+
 /**
  * Executes an AI-powered semantic search over EXCLUSIVELY the provided user catalog.
  * Guarantees zero hallucinations by:
@@ -14,7 +21,8 @@ interface AISearchResult {
  */
 export async function searchWithAI(
   query: string,
-  userTracks: UserTrack[]
+  userTracks: UserTrack[],
+  userApiKey?: string
 ): Promise<AISearchResult> {
   if (!query || userTracks.length === 0) {
     return { matchedIds: [], reason: 'Catalog is empty or query is missing.' };
@@ -26,8 +34,11 @@ export async function searchWithAI(
     validIdMap.set(track.id, track);
   }
 
+  // Bound catalog size to max 500 candidates to balance latency and comprehensive library coverage
+  const candidatePool = userTracks.length > 500 ? userTracks.slice(0, 500) : userTracks;
+
   // Build condensed catalog representation to minimize token usage
-  const compactCatalog = userTracks.map((t) => ({
+  const compactCatalog = candidatePool.map((t) => ({
     id: t.id,
     title: t.title,
     artist: t.artist,
@@ -47,19 +58,21 @@ CRITICAL NON-NEGOTIABLE RULES:
   "reason": "Short explanation of why these songs fit the query"
 }`;
 
-  const userPrompt = `User Query: "${query}"
+  const userPrompt = `User Query: "${query.replace(/"/g, "'")}"
 
 User's Catalog:
 ${JSON.stringify(compactCatalog, null, 2)}
 
 Filter and return matching IDs in the requested JSON format:`;
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = (userApiKey && userApiKey.trim() !== '')
+    ? userApiKey.trim()
+    : process.env.GEMINI_API_KEY;
 
   if (apiKey && apiKey !== 'your_gemini_api_key') {
     try {
-      // Call Gemini 2.5 / 1.5 Flash via REST API
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      // Call Gemini 2.0 Flash via REST API using secure header
+      const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
       const payload = {
         contents: [
           {
@@ -69,13 +82,16 @@ Filter and return matching IDs in the requested JSON format:`;
         ],
         generationConfig: {
           responseMimeType: 'application/json',
-          temperature: 0.1, // low temperature for strict factual adherence
+          temperature: 0.1,
         },
       };
 
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify(payload),
       });
 
@@ -83,7 +99,14 @@ Filter and return matching IDs in the requested JSON format:`;
         const data = await res.json();
         const rawJsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (rawJsonText) {
-          const parsed = JSON.parse(rawJsonText);
+          let cleanJson = rawJsonText.trim();
+          if (cleanJson.startsWith('```json')) {
+            cleanJson = cleanJson.replace(/^```json\s*/i, '').replace(/```\s*$/i, '');
+          } else if (cleanJson.startsWith('```')) {
+            cleanJson = cleanJson.replace(/^```\s*/, '').replace(/```\s*$/i, '');
+          }
+
+          const parsed = JSON.parse(cleanJson);
           const rawIds: string[] = Array.isArray(parsed.matched_ids) ? parsed.matched_ids : [];
 
           // Defense in Depth: strictly filter out any ID that was not in user's original tracks
@@ -101,13 +124,12 @@ Filter and return matching IDs in the requested JSON format:`;
     }
   }
 
-  // Smart Heuristic Fallback (when no GEMINI_API_KEY is configured in dev)
-  // Ensures developer can test AI mode immediately without an API key!
+  // Smart Heuristic Fallback (when no API key or on API failure)
   return runSmartHeuristicFilter(query, userTracks);
 }
 
 /**
- * Intelligent deterministic music taxonomy filter used as a dev fallback.
+ * Intelligent deterministic music taxonomy filter used as a dev/offline fallback.
  * Maps moods, styles, and genres to musical keywords and filters the user's catalog.
  */
 function runSmartHeuristicFilter(query: string, tracks: UserTrack[]): AISearchResult {
@@ -136,8 +158,12 @@ function runSmartHeuristicFilter(query: string, tracks: UserTrack[]): AISearchRe
     }
   }
 
-  // Also extract query words directly
-  const queryWords = q.split(/\s+/).filter((w) => w.length > 2);
+  // Extract query words while ignoring stop words
+  const queryWords = q
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-záéíóúüñ0-9]/gi, '').trim())
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
   queryWords.forEach((w) => matchedKeywords.add(w));
 
   const matchedIds: string[] = [];

@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "music-playlist-radar",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://music-playlist-radar.cdoprojects.workers.dev",
+    "SPOTIFY_REDIRECT_URI": "https://music-playlist-radar.cdoprojects.workers.dev/api/auth/spotify/callback",
+    "GOOGLE_REDIRECT_URI": "https://music-playlist-radar.cdoprojects.workers.dev/api/auth/google/callback"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "music-playlist-radar-d1",
+      "database_id": "00b3327b-1322-4a81-9f76-e3e59dbdf6db"
+    }
+  ]
+}

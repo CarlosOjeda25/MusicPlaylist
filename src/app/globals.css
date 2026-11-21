@@ -3,29 +3,86 @@
 @tailwind utilities;
 
 :root {
-  --background: #090a0f;
-  --foreground: #f3f4f6;
+  --bg-studio: #0b0c10;
+  --bg-surface: #13151b;
+  --bg-surface-elevated: #1b1e27;
+  --accent-amber: #f59e0b;
+  --accent-tungsten: #d97706;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-studio);
+  color: #f1f3f7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbars */
+/* Studio Audio LED / VU Meter Animations */
+@keyframes vuPulse1 {
+  0%, 100% { height: 15%; opacity: 0.6; }
+  25% { height: 75%; opacity: 1; }
+  50% { height: 40%; opacity: 0.8; }
+  75% { height: 95%; opacity: 1; }
+}
+
+@keyframes vuPulse2 {
+  0%, 100% { height: 60%; opacity: 0.9; }
+  25% { height: 25%; opacity: 0.5; }
+  50% { height: 90%; opacity: 1; }
+  75% { height: 45%; opacity: 0.7; }
+}
+
+@keyframes vuPulse3 {
+  0%, 100% { height: 35%; opacity: 0.7; }
+  35% { height: 90%; opacity: 1; }
+  70% { height: 20%; opacity: 0.4; }
+}
+
+@keyframes radarSweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-vu-1 { animation: vuPulse1 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-vu-2 { animation: vuPulse2 0.85s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-vu-3 { animation: vuPulse3 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-radar-sweep { animation: radarSweep 8s linear infinite; }
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Subtle Studio Dot Matrix Grid */
+.studio-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Custom Studio Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #11141f;
+  background: #090a0d;
 }
 ::-webkit-scrollbar-thumb {
-  background: #23293d;
+  background: #252a38;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #333d59;
+  background: #394258;
 }

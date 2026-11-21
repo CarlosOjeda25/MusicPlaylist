@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const query = (body.query || '').trim();
     const mode = body.mode === 'ai' ? 'ai' : 'text';
+    const userApiKey = req.headers.get('x-gemini-key') || body.userApiKey || '';
 
     if (!query) {
       return NextResponse.json(
@@ -19,8 +20,7 @@ export async function POST(req: NextRequest) {
 
     const user = await getCurrentUser();
 
-    // Acceptance Criterion 1 & 2:
-    // Only search songs belonging strictly to the authenticated user's catalog
+    // 1. Text Search Mode
     if (mode === 'text') {
       const matchedTracks = await db.searchUserTracks(user.id, query);
 
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(response);
     }
 
-    // AI Mode:
+    // 2. AI Mode
     // Fetch all tracks belonging strictly to user.id
     const userTracks = await db.getUserTracks(user.id);
 
@@ -53,12 +53,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(response);
     }
 
-    // Call AI curator passing EXCLUSIVELY this user's tracks
-    const aiResult = await searchWithAI(query, userTracks);
+    // Call AI curator passing EXCLUSIVELY this user's tracks & optional BYOK Gemini API key
+    const aiResult = await searchWithAI(query, userTracks, userApiKey);
 
-    // Guaranteed Zero-Hallucination:
-    // Look up the matched IDs strictly within this user's tracks
-    const finalTracks = await db.getUserTracksByIds(user.id, aiResult.matchedIds);
+    // Guaranteed Zero-Hallucination & In-Memory Matching
+    const trackMap = new Map<string, UserTrack>(userTracks.map((t) => [t.id, t]));
+    const finalTracks: UserTrack[] = [];
+    const seenIds = new Set<string>();
+
+    for (const id of aiResult.matchedIds) {
+      if (!seenIds.has(id)) {
+        const track = trackMap.get(id);
+        if (track) {
+          finalTracks.push(track);
+          seenIds.add(id);
+        }
+      }
+    }
 
     const response: SearchResponse = {
       query,
@@ -75,6 +86,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response);
   } catch (error: any) {
     console.error('[Search API Error]', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal Search Error' }, { status: 500 });
   }
 }

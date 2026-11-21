@@ -15,8 +15,12 @@ Aplicación web full-stack que permite a los usuarios conectar sus cuentas de **
 - **Framework:** Next.js (App Router, Route Handlers, Server/Client Components).
 - **Estilos:** Tailwind CSS con diseño moderno responsivo en modo oscuro.
 - **Base de Datos Híbrida Resiliente:**
-  - **Producción:** PostgreSQL (Supabase / Neon / Docker) mediante `pg.Pool` con esquema relacional indexado.
-  - **Desarrollo Local:** Almacenamiento JSON persistente automático en `./data/storage.json` con catálogo demo inicial precargado, permitiendo ejecutar y evaluar la app de inmediato sin configurar un servidor de base de datos.
+  - **Cloudflare D1 (Producción Edge):** SQLite nativo distribuido de Cloudflare (`wrangler.json`, `src/lib/db/d1-schema.sql`) sin pausas por inactividad y latencia ultrabaja.
+  - **PostgreSQL (Serverless / Docker):** Mediante `pg.Pool` con esquema relacional indexado y soporte de transacciones por lotes (`src/lib/db/schema.sql`).
+  - **Desarrollo Local:** Almacenamiento JSON persistente con escritura atómica segura en `./data/storage.json` con catálogo demo inicial precargado, permitiendo ejecutar y evaluar la app de inmediato sin configurar un servidor de base de datos.
+- **Modelo BYOK (Bring Your Own Key) para IA:**
+  - Los usuarios pueden conectar su propia clave de **Google Gemini** directamente desde la UI de la consola de radar (con tutorial integrado a [Google AI Studio](https://aistudio.google.com/app/apikey)).
+  - La clave se almacena exclusivamente en el navegador (`localStorage`) y se transmite por encabezado seguro `x-gemini-key`, garantizando costo cero para el operador y privacidad total.
 - **Seguridad y Cifrado:**
   - Tokens de acceso y refresco OAuth cifrados en reposo utilizando **AES-256-GCM** nativo de Node.js (`src/lib/crypto.ts`).
   - Todas las consultas de lectura, sincronización y búsqueda están **estrictamente filtradas por `user_id`**.

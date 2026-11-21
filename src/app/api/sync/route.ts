@@ -53,6 +53,26 @@ export async function POST() {
       }
     }
 
+    const attemptedCount = (hasSpotify ? 1 : 0) + (hasGoogle ? 1 : 0);
+    const failedCount =
+      (response.providers.spotify?.error ? 1 : 0) + (response.providers.google?.error ? 1 : 0);
+
+    if (attemptedCount === 0) {
+      response.success = false;
+      return NextResponse.json(
+        { ...response, error: 'No hay cuentas de Spotify o YouTube conectadas. Conecta una primero.' },
+        { status: 400 }
+      );
+    }
+
+    if (failedCount === attemptedCount) {
+      response.success = false;
+      return NextResponse.json(
+        { ...response, error: 'Falló la sincronización con todos los proveedores conectados.' },
+        { status: 502 }
+      );
+    }
+
     if (allCollectedTracks.length > 0) {
       const { inserted, total } = await db.upsertUserTracks(allCollectedTracks);
       response.new_tracks = inserted;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getGoogleAuthUrl } from '@/lib/services/youtube';
+import { generateGoogleState, getGoogleAuthUrl } from '@/lib/services/youtube';
 
 export async function GET() {
   if (!process.env.GOOGLE_CLIENT_ID) {
@@ -8,6 +8,18 @@ export async function GET() {
       { status: 500 }
     );
   }
-  const url = getGoogleAuthUrl();
-  return NextResponse.redirect(url);
+
+  const state = generateGoogleState();
+  const url = getGoogleAuthUrl(state);
+
+  const res = NextResponse.redirect(url);
+  res.cookies.set('oauth_state_google', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 15 * 60, // 15 minutes
+    path: '/',
+  });
+
+  return res;
 }

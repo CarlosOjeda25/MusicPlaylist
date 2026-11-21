@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSpotifyAuthUrl } from '@/lib/services/spotify';
+import { generateSpotifyState, getSpotifyAuthUrl } from '@/lib/services/spotify';
 
 export async function GET() {
   if (!process.env.SPOTIFY_CLIENT_ID) {
@@ -8,6 +8,18 @@ export async function GET() {
       { status: 500 }
     );
   }
-  const url = getSpotifyAuthUrl();
-  return NextResponse.redirect(url);
+
+  const state = generateSpotifyState();
+  const url = getSpotifyAuthUrl(state);
+
+  const res = NextResponse.redirect(url);
+  res.cookies.set('oauth_state_spotify', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 15 * 60, // 15 minutes
+    path: '/',
+  });
+
+  return res;
 }
