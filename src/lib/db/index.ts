@@ -66,6 +66,18 @@ export class DatabaseService {
   private isD1Available = false;
   private localFilePath: string;
   private initPromise: Promise<void>;
+  private memoryData: StorageData = {
+    users: [
+      {
+        id: 'user_main',
+        email: 'user@radar.audio',
+        name: 'Usuario Principal',
+        created_at: new Date().toISOString(),
+      },
+    ],
+    connected_accounts: [],
+    user_tracks: [],
+  };
 
   constructor() {
     this.localFilePath = path.join(process.cwd(), 'data', 'storage.json');
@@ -74,14 +86,47 @@ export class DatabaseService {
 
   public async ready(): Promise<void> {
     await this.initPromise;
+    if (!this.d1) {
+      await this.resolveD1();
+    }
   }
 
-  private async init(): Promise<void> {
-    // 1. Check for Cloudflare D1 binding
+  private async resolveD1(): Promise<void> {
+    // 1. Check globalThis.DB
     const globalD1 = (globalThis as any).DB as D1Database | undefined;
     if (globalD1 && typeof globalD1.prepare === 'function') {
       this.d1 = globalD1;
       this.isD1Available = true;
+      return;
+    }
+
+    // 2. Check process.env.DB
+    const processD1 = (process.env as any).DB as D1Database | undefined;
+    if (processD1 && typeof processD1.prepare === 'function') {
+      this.d1 = processD1;
+      this.isD1Available = true;
+      return;
+    }
+
+    // 3. Check OpenNext getCloudflareContext
+    try {
+      const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+      const ctx = await getCloudflareContext({ async: true });
+      const envAny = ctx?.env as any;
+      if (envAny?.DB && typeof envAny.DB.prepare === 'function') {
+        this.d1 = envAny.DB;
+        this.isD1Available = true;
+        return;
+      }
+    } catch {
+      // Ignored outside of Cloudflare request context
+    }
+  }
+
+  private async init(): Promise<void> {
+    // 1. Attempt D1 resolution
+    await this.resolveD1();
+    if (this.isD1Available) {
       console.log('[DB] Connected to Cloudflare D1 database.');
       return;
     }
@@ -108,43 +153,59 @@ export class DatabaseService {
       }
     }
 
-    // 3. Fallback to local storage JSON
+    // 3. Fallback to local storage (safe try/catch for edge/worker environments)
     this.ensureLocalFile();
   }
 
   private ensureLocalFile() {
-    const dir = path.dirname(this.localFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    if (!fs.existsSync(this.localFilePath)) {
-      const initial: StorageData = {
-        users: [
-          {
-            id: 'user_main',
-            email: 'user@radar.audio',
-            name: 'Usuario Principal',
-            created_at: new Date().toISOString(),
-          },
-        ],
-        connected_accounts: [],
-        user_tracks: [],
-      };
-      fs.writeFileSync(this.localFilePath, JSON.stringify(initial, null, 2), 'utf8');
-      
+    try {
+      const dir = path.dirname(this.localFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      if (!fs.existsSync(this.localFilePath)) {
+        const initial: StorageData = {
+          users: [
+            {
+              id: 'user_main',
+              email: 'user@radar.audio',
+              name: 'Usuario Principal',
+              created_at: new Date().toISOString(),
+            },
+          ],
+          connected_accounts: [],
+          user_tracks: [],
+        };
+        fs.writeFileSync(this.localFilePath, JSON.stringify(initial, null, 2), 'utf8');
+      }
+    } catch {
+      // Filesystem not writable or not supported in this runtime (e.g. Cloudflare Workers unenv)
     }
   }
 
   private readLocal(): StorageData {
-    this.ensureLocalFile();
-    const raw = fs.readFileSync(this.localFilePath, 'utf8');
-    return JSON.parse(raw);
+    try {
+      this.ensureLocalFile();
+      if (fs.existsSync(this.localFilePath)) {
+        const raw = fs.readFileSync(this.localFilePath, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch {
+      // In unenv / workerd, fallback to memory
+    }
+    return this.memoryData;
   }
 
   private writeLocal(data: StorageData) {
-    const tmp = `${this.localFilePath}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmp, this.localFilePath);
+    try {
+      this.ensureLocalFile();
+      const tmp = `${this.localFilePath}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+      fs.renameSync(tmp, this.localFilePath);
+    } catch {
+      // In unenv / workerd, fallback to memory
+      this.memoryData = data;
+    }
   }
 
   private async runPgMigrations() {
