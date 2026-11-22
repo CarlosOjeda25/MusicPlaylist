@@ -71,8 +71,6 @@ Filter and return matching IDs in the requested JSON format:`;
 
   if (apiKey && apiKey !== 'your_gemini_api_key') {
     try {
-      // Call Gemini 2.0 Flash via REST API using secure header
-      const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
       const payload = {
         contents: [
           {
@@ -86,7 +84,8 @@ Filter and return matching IDs in the requested JSON format:`;
         },
       };
 
-      const res = await fetch(endpoint, {
+      // 1. Try Gemini 2.0 Flash via REST API using secure header
+      let res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -94,6 +93,18 @@ Filter and return matching IDs in the requested JSON format:`;
         },
         body: JSON.stringify(payload),
       });
+
+      // 2. Fallback to Gemini 1.5 Flash if 2.0 is not available on this key/region
+      if (!res.ok) {
+        res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify(payload),
+        });
+      }
 
       if (res.ok) {
         const data = await res.json();
@@ -113,11 +124,19 @@ Filter and return matching IDs in the requested JSON format:`;
           const verifiedIds = rawIds.filter((id) => validIdMap.has(id));
           return {
             matchedIds: verifiedIds,
-            reason: parsed.reason || 'Songs matching your theme from your radar.',
+            reason: `[Gemini IA] ${parsed.reason || 'Canciones seleccionadas con análisis semántico.'}`,
           };
         }
       } else {
-        console.warn(`[AI Search] Gemini API returned status ${res.status}. Falling back to smart semantic filter.`);
+        const errText = await res.text();
+        console.warn(`[AI Search] Gemini API returned status ${res.status}: ${errText}`);
+        if (userApiKey) {
+          const fallback = runSmartHeuristicFilter(query, userTracks);
+          return {
+            matchedIds: fallback.matchedIds,
+            reason: `[Filtro de estilo] ${fallback.reason} (Nota: Gemini devolvió código ${res.status})`,
+          };
+        }
       }
     } catch (err) {
       console.warn('[AI Search] Gemini API call failed. Using fallback filter.', err);
@@ -136,19 +155,23 @@ function runSmartHeuristicFilter(query: string, tracks: UserTrack[]): AISearchRe
   const q = query.toLowerCase();
 
   const MOOD_TAXONOMY: Record<string, string[]> = {
-    chill: ['ambient', 'chill', 'sleep', 'weightless', 'piano', 'chopin', 'debussy', 'bon iver', 'acoustic', 'jazz', 'quiet'],
-    concentrarse: ['ambient', 'sleep', 'weightless', 'piano', 'chopin', 'debussy', 'focus', 'strobe', 'deadmau5', 'miles davis'],
-    focus: ['ambient', 'focus', 'piano', 'chopin', 'debussy', 'weightless', 'strobe', 'deadmau5', 'miles davis', 'instrumental'],
-    fiesta: ['daft punk', 'dance', 'lucky', 'harder', 'disco', 'funk', 'party', 'electro'],
-    dance: ['daft punk', 'dance', 'lucky', 'harder', 'disco', 'funk', 'electro', 'party'],
-    electrónica: ['daft punk', 'deadmau5', 'synthwave', 'm83', 'resonance', 'home', 'electro', 'dance'],
-    electro: ['daft punk', 'deadmau5', 'synthwave', 'm83', 'resonance', 'home', 'electro'],
-    rock: ['arctic monkeys', 'indie', 'tame impala', 'rock'],
-    indie: ['arctic monkeys', 'tame impala', 'bon iver', 'm83', 'indie', 'folk'],
-    jazz: ['miles davis', 'jazz', 'blue', 'trumpet'],
-    clasica: ['chopin', 'debussy', 'nocturne', 'clair de lune', 'piano', 'classical'],
-    tranquila: ['ambient', 'weightless', 'piano', 'chopin', 'debussy', 'bon iver', 'miles davis', 'chill', 'sleep'],
-    noche: ['night', 'midnight', 'synthwave', 'm83', 'miles davis', 'nocturne', 'resonance'],
+    electro: ['electro', 'electronic', 'electrónica', 'edm', 'house', 'techno', 'phonk', 'dance', 'synth', 'synthwave', 'avicii', 'daft punk', 'deadmau5', 'm83', 'bass', 'beat', 'wave', 'dj', 'remix', 'rave', 'club', 'trance', 'dubstep'],
+    electrónica: ['electro', 'electronic', 'electrónica', 'edm', 'house', 'techno', 'phonk', 'dance', 'synth', 'synthwave', 'avicii', 'daft punk', 'deadmau5', 'm83', 'bass', 'beat', 'wave', 'dj', 'remix', 'rave', 'club', 'trance', 'dubstep'],
+    edm: ['edm', 'dance', 'house', 'avicii', 'festival', 'electro', 'drop', 'remix', 'club', 'dj'],
+    phonk: ['phonk', 'drift', 'bass', 'gym', 'wave', 'neon', 'cowbell', 'kordhell', 'moondeity', 'memphis'],
+    gym: ['gym', 'phonk', 'workout', 'entrenar', 'entrenamiento', 'harder', 'energy', 'power', 'bass', 'neon', 'kordhell', 'moondeity'],
+    entrenar: ['gym', 'phonk', 'workout', 'entrenar', 'entrenamiento', 'harder', 'energy', 'power', 'bass', 'neon', 'kordhell', 'moondeity'],
+    dance: ['dance', 'daft punk', 'disco', 'funk', 'electro', 'party', 'avicii', 'house', 'club', 'remix'],
+    fiesta: ['party', 'fiesta', 'dance', 'disco', 'funk', 'electro', 'daft punk', 'avicii', 'reggaeton', 'remix', 'club'],
+    chill: ['chill', 'ambient', 'sleep', 'weightless', 'piano', 'chopin', 'debussy', 'bon iver', 'acoustic', 'jazz', 'quiet', 'relax', 'calm', 'suave', 'tranquila', 'lo-fi', 'lofi'],
+    concentrarse: ['ambient', 'sleep', 'weightless', 'piano', 'chopin', 'debussy', 'focus', 'strobe', 'deadmau5', 'miles davis', 'instrumental', 'lo-fi', 'lofi', 'estudiar'],
+    focus: ['ambient', 'focus', 'piano', 'chopin', 'debussy', 'weightless', 'strobe', 'deadmau5', 'miles davis', 'instrumental', 'lo-fi', 'lofi', 'estudiar'],
+    rock: ['rock', 'metal', 'guitar', 'arctic monkeys', 'indie', 'tame impala', 'band'],
+    indie: ['indie', 'arctic monkeys', 'tame impala', 'bon iver', 'm83', 'folk', 'alternative'],
+    jazz: ['jazz', 'miles davis', 'blue', 'trumpet', 'saxophone', 'piano', 'smooth'],
+    clasica: ['chopin', 'debussy', 'nocturne', 'clair de lune', 'piano', 'classical', 'orchestra', 'symphony'],
+    tranquila: ['tranquila', 'ambient', 'weightless', 'piano', 'chopin', 'debussy', 'bon iver', 'miles davis', 'chill', 'sleep', 'paz', 'relax'],
+    noche: ['night', 'midnight', 'noche', 'synthwave', 'm83', 'miles davis', 'nocturne', 'resonance', 'dark'],
   };
 
   const matchedKeywords = new Set<string>();
