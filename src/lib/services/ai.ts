@@ -34,36 +34,33 @@ export async function searchWithAI(
     validIdMap.set(track.id, track);
   }
 
-  // Bound catalog size to max 500 candidates to balance latency and comprehensive library coverage
-  const candidatePool = userTracks.length > 500 ? userTracks.slice(0, 500) : userTracks;
+  // Bound catalog size to max 300 candidates to balance latency and comprehensive library coverage
+  const candidatePool = userTracks.length > 300 ? userTracks.slice(0, 300) : userTracks;
 
-  // Build condensed catalog representation to minimize token usage
-  const compactCatalog = candidatePool.map((t) => ({
-    id: t.id,
-    title: t.title,
-    artist: t.artist,
-    playlist: t.playlist_name,
-  }));
+  // Build condensed, line-by-line catalog representation to minimize token usage and avoid 503 errors
+  const compactCatalogText = candidatePool
+    .map((t) => `${t.id} | ${t.title} | ${t.artist} | ${t.playlist_name}`)
+    .join('\n');
 
-  const systemPrompt = `You are a music curator assistant for a personal playlist radar.
-Your role is to analyze a user's personal song catalog and return ONLY the songs that match their search intent (genre, mood, atmosphere, tempo, era, or theme).
+  const systemPrompt = `Eres un curador musical experto para un radar de playlists.
+Tu función es analizar el catálogo personal del usuario y seleccionar ÚNICAMENTE las canciones que coincidan con la intención, vibra, género, atmósfera, época o estilo solicitado.
 
-CRITICAL NON-NEGOTIABLE RULES:
-1. YOU MUST ONLY SELECT IDs FROM THE PROVIDED USER CATALOG.
-2. NEVER INVENT, HALLUCINATE, OR SUGGEST ANY SONG OR ID NOT IN THE LIST.
-3. If no songs match the requested mood or style, return an empty array for "matched_ids".
-4. You must respond ONLY with a valid JSON object matching this schema:
+REGLAS ESTRICTAS:
+1. Selecciona ÚNICAMENTE IDs que existan en el catálogo proporcionado.
+2. NUNCA inventes canciones ni IDs fuera de la lista.
+3. Si ninguna canción coincide con el estilo, devuelve "matched_ids": [].
+4. Responde ÚNICAMENTE con un JSON válido con esta estructura:
 {
-  "matched_ids": ["string (valid ID from catalog)"],
-  "reason": "Short explanation of why these songs fit the query"
+  "matched_ids": ["string (ID válido del catálogo)"],
+  "reason": "Explicación breve en español de por qué encajan estas canciones"
 }`;
 
-  const userPrompt = `User Query: "${query.replace(/"/g, "'")}"
+  const userPrompt = `Consulta del usuario: "${query.replace(/"/g, "'")}"
 
-User's Catalog:
-${JSON.stringify(compactCatalog, null, 2)}
+Catálogo de canciones (ID | Título | Artista | Playlist):
+${compactCatalogText}
 
-Filter and return matching IDs in the requested JSON format:`;
+Analiza el catálogo y devuelve los IDs coincidentes en JSON con "matched_ids" y "reason" (en español):`;
 
   const apiKey = (userApiKey && userApiKey.trim() !== '')
     ? userApiKey.trim()
