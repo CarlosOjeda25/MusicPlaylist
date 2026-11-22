@@ -11,9 +11,9 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "NEXT_PUBLIC_APP_URL": "https://music-playlist-radar.cdoprojects.workers.dev",
-    "SPOTIFY_REDIRECT_URI": "https://music-playlist-radar.cdoprojects.workers.dev/api/auth/spotify/callback",
-    "GOOGLE_REDIRECT_URI": "https://music-playlist-radar.cdoprojects.workers.dev/api/auth/google/callback"
+    "NEXT_PUBLIC_APP_URL": "https://musicplaylist.cdoprojects.workers.dev",
+    "SPOTIFY_REDIRECT_URI": "https://musicplaylist.cdoprojects.workers.dev/api/auth/spotify/callback",
+    "GOOGLE_REDIRECT_URI": "https://musicplaylist.cdoprojects.workers.dev/api/auth/google/callback"
   },
   "d1_databases": [
     {
