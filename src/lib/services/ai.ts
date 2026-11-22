@@ -84,8 +84,8 @@ Filter and return matching IDs in the requested JSON format:`;
         },
       };
 
-      // 1. Try Gemini 2.0 Flash via REST API using secure header
-      let res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+      // 1. Try Gemini 3.1 Flash Lite via REST API using secure header
+      let res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -94,9 +94,21 @@ Filter and return matching IDs in the requested JSON format:`;
         body: JSON.stringify(payload),
       });
 
-      // 2. Fallback to Gemini 1.5 Flash if 2.0 is not available on this key/region
+      // 2. Fallback to Gemini 3.8 Flash if lite is unavailable
       if (!res.ok) {
-        res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent', {
+        res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      // 3. Fallback to Gemini Flash Latest
+      if (!res.ok) {
+        res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -117,14 +129,15 @@ Filter and return matching IDs in the requested JSON format:`;
             cleanJson = cleanJson.replace(/^```\s*/, '').replace(/```\s*$/i, '');
           }
 
-          const parsed = JSON.parse(cleanJson);
-          const rawIds: string[] = Array.isArray(parsed.matched_ids) ? parsed.matched_ids : [];
+          const parsedRaw = JSON.parse(cleanJson);
+          const parsed = Array.isArray(parsedRaw) ? parsedRaw[0] : parsedRaw;
+          const rawIds: string[] = Array.isArray(parsed?.matched_ids) ? parsed.matched_ids : [];
 
           // Defense in Depth: strictly filter out any ID that was not in user's original tracks
           const verifiedIds = rawIds.filter((id) => validIdMap.has(id));
           return {
             matchedIds: verifiedIds,
-            reason: `[Gemini IA] ${parsed.reason || 'Canciones seleccionadas con análisis semántico.'}`,
+            reason: `[Gemini IA] ${parsed?.reason || 'Canciones seleccionadas con análisis semántico.'}`,
           };
         }
       } else {
