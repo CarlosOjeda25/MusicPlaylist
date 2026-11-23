@@ -193,21 +193,29 @@ export async function syncSpotifyTracks(userId: string): Promise<{
       if (playlistsProcessed >= MAX_PLAYLISTS) break;
       playlistsProcessed++;
 
-      let tracksUrl: string | null = `${SPOTIFY_API_BASE}/playlists/${pl.id}/tracks?limit=100`;
+      let tracksUrl: string | null = `${SPOTIFY_API_BASE}/playlists/${pl.id}/items?limit=100`;
       let count = 0;
 
       while (tracksUrl && count < 300) {
-        const tRes: Response = await fetch(tracksUrl, { headers });
-        if (!tRes.ok) break;
+        let tRes: Response = await fetch(tracksUrl, { headers });
+        if (!tRes.ok && tracksUrl.includes('/items?')) {
+          // Fallback to legacy /tracks if /items returns an error
+          tRes = await fetch(`${SPOTIFY_API_BASE}/playlists/${pl.id}/tracks?limit=100`, { headers });
+        }
+        if (!tRes.ok) {
+          console.warn(`[Spotify Sync] Skipping playlist "${pl.name}" (${pl.id}): ${tRes.status}`);
+          break;
+        }
 
-        const tData: { items?: Array<{ track?: { id?: string; name?: string; artists?: Array<{ name: string }> } }>; next?: string | null } = await tRes.json();
-        for (const item of tData.items || []) {
-          const track = item.track;
+        const tData: any = await tRes.json();
+        for (const entry of tData.items || []) {
+          // In the updated Spotify API, the track object is in entry.item (fallback to entry.track)
+          const track = entry.item || entry.track;
           if (track && track.id && track.name) {
             collectedTracks.push({
               user_id: userId,
               title: track.name,
-              artist: track.artists?.map((a) => a.name).join(', ') || 'Unknown Artist',
+              artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
               playlist_name: pl.name,
               source: 'spotify',
               external_id: track.id,
@@ -220,6 +228,35 @@ export async function syncSpotifyTracks(userId: string): Promise<{
       }
     }
     playlistUrl = playlistsProcessed < MAX_PLAYLISTS ? (data.next || null) : null;
+  }
+
+  // Also sync user's Saved Tracks (Liked Songs / Biblioteca)
+  try {
+    let savedUrl: string | null = `${SPOTIFY_API_BASE}/me/tracks?limit=50`;
+    let savedCount = 0;
+    while (savedUrl && savedCount < 200) {
+      const sRes: Response = await fetch(savedUrl, { headers });
+      if (!sRes.ok) break;
+      const sData: any = await sRes.json();
+      for (const entry of sData.items || []) {
+        const track = entry.item || entry.track;
+        if (track && track.id && track.name) {
+          collectedTracks.push({
+            user_id: userId,
+            title: track.name,
+            artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+            playlist_name: 'Liked Songs',
+            source: 'spotify',
+            external_id: track.id,
+            synced_at: new Date().toISOString(),
+          });
+          savedCount++;
+        }
+      }
+      savedUrl = sData.next || null;
+    }
+  } catch (err) {
+    console.warn('[Spotify Sync] Error fetching saved tracks:', err);
   }
 
   return {
